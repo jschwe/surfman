@@ -92,6 +92,17 @@ impl ConnectionInterface for Connection {
     }
 
     #[inline]
+    #[cfg(target_env = "ohos")]
+    unsafe fn create_native_widget_from_ptr_ohos(
+        &self,
+        xcomponent: *mut c_void,
+        raw: *mut c_void,
+        size: Size2D<i32>,
+    ) -> NativeWidget {
+        Connection::create_native_widget_from_ptr_ohos(self, xcomponent, raw, size)
+    }
+
+    #[inline]
     #[cfg(feature = "sm-raw-window-handle-05")]
     fn create_native_widget_from_raw_window_handle(
         &self,

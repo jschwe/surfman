@@ -9,6 +9,11 @@ pub mod android;
 #[cfg(android)]
 pub use android as default;
 
+#[cfg(ohos)]
+pub mod ohos;
+#[cfg(ohos)]
+pub use ohos as default;
+
 #[cfg(macos)]
 pub mod macos;
 #[cfg(macos)]
@@ -16,9 +21,9 @@ pub use macos::cgl as default;
 #[cfg(macos)]
 pub use macos::system;
 
-#[cfg(linux)]
+#[cfg(all(linux, not(ohos)))]
 pub mod unix;
-#[cfg(linux)]
+#[cfg(all(linux, not(ohos)))]
 pub use unix::default;
 
 #[cfg(windows)]
