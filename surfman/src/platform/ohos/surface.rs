@@ -1,38 +1,38 @@
 // surfman/surfman/src/platform/ohos/surface.rs
 //
-//! Surface management for Android using the `GraphicBuffer` class and EGL.
+//! Surface management for OpenHarmony OS using EGL.
 
-use std::convert::TryInto;
-use super::context::{Context, GL_FUNCTIONS};
-use super::device::Device;
-use crate::context::ContextID;
-use crate::egl;
-use crate::egl::types::{EGLSurface, EGLint};
-use crate::gl;
-use crate::gl::types::{GLenum, GLuint};
-use crate::gl_utils;
-use crate::platform::generic;
-use crate::platform::generic::egl::device::EGL_FUNCTIONS;
-use crate::platform::generic::egl::ffi::EGLImageKHR;
-use crate::platform::generic::egl::ffi::EGL_EXTENSION_FUNCTIONS;
-use crate::platform::generic::egl::ffi::EGL_IMAGE_PRESERVED_KHR;
-use crate::platform::generic::egl::ffi::EGL_NATIVE_BUFFER_ANDROID;
-use crate::platform::generic::egl::ffi::EGL_NO_IMAGE_KHR;
-use crate::renderbuffers::Renderbuffers;
-use crate::{Error, SurfaceAccess, SurfaceID, SurfaceInfo, SurfaceType, WindowingApiError};
-use super::ffi::{OH_NativeBuffer,OH_NativeXComponent, OH_NativeBuffer_Alloc, OH_NativeBuffer_Config, OH_NativeBuffer_Format, OH_NativeBuffer_Unreference, OH_NativeBuffer_Usage, OHNativeWindow};
-
-use log::info;
-
-use euclid::default::Size2D;
 use std::fmt::{self, Debug, Formatter};
 use std::marker::PhantomData;
 use std::os::raw::c_void;
 use std::ptr;
 use std::thread;
 
+use euclid::default::Size2D;
+use log::info;
+
+use crate::context::ContextID;
+use crate::egl;
+use crate::egl::types::EGLSurface;
+use crate::gl;
+use crate::gl::types::{GLenum, GLuint};
+use crate::gl_utils;
+use crate::platform::generic;
 pub use crate::platform::generic::egl::context::ContextDescriptor;
-use crate::platform::ohos::ffi_xcomponents::OH_NativeXComponent_GetXComponentSize;
+use crate::platform::generic::egl::device::EGL_FUNCTIONS;
+use crate::platform::generic::egl::ffi::EGLImageKHR;
+use crate::platform::generic::egl::ffi::EGL_EXTENSION_FUNCTIONS;
+use crate::platform::generic::egl::ffi::EGL_NO_IMAGE_KHR;
+use crate::renderbuffers::Renderbuffers;
+use crate::{Error, SurfaceAccess, SurfaceID, SurfaceInfo, SurfaceType, WindowingApiError};
+
+use super::context::{Context, GL_FUNCTIONS};
+use super::device::Device;
+use super::ffi::{
+    NativeWindowOperation::GET_BUFFER_GEOMETRY, OHNativeWindow, OH_NativeBuffer,
+    OH_NativeBuffer_Alloc, OH_NativeBuffer_Config, OH_NativeBuffer_Format,
+    OH_NativeBuffer_Unreference, OH_NativeBuffer_Usage, OH_NativeWindow_NativeWindowHandleOpt,
+};
 
 const SURFACE_GL_TEXTURE_TARGET: GLenum = gl::TEXTURE_2D;
 
@@ -112,7 +112,6 @@ impl Debug for SurfaceTexture {
 
 /// An OHOS native window.
 pub struct NativeWidget {
-    pub(crate) xcomponent: *mut OH_NativeXComponent,
     pub(crate) native_window: *mut OHNativeWindow,
 }
 
@@ -154,12 +153,12 @@ impl Device {
                     width: size.width,
                     stride: 10,
                     // FIXME: No idea what the usage should be on ohos.
-                    usage: OH_NativeBuffer_Usage::NATIVEBUFFER_USAGE_MEM_DMA.0 as i32 // AHARDWAREBUFFER_USAGE_CPU_READ_NEVER
-                        //| AHARDWAREBUFFER_USAGE_CPU_WRITE_NEVER
-                        //| AHARDWAREBUFFER_USAGE_GPU_FRAMEBUFFER
-                        //| AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE,
+                    usage: OH_NativeBuffer_Usage::NATIVEBUFFER_USAGE_MEM_DMA.0 as i32, // AHARDWAREBUFFER_USAGE_CPU_READ_NEVER
+                                                                                       //| AHARDWAREBUFFER_USAGE_CPU_WRITE_NEVER
+                                                                                       //| AHARDWAREBUFFER_USAGE_GPU_FRAMEBUFFER
+                                                                                       //| AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE,
                 };
-                let mut hardware_buffer = OH_NativeBuffer_Alloc(&hardware_buffer_desc);
+                let hardware_buffer = OH_NativeBuffer_Alloc(&hardware_buffer_desc);
                 if hardware_buffer.is_null() {
                     return Err(Error::SurfaceCreationFailed(WindowingApiError::Failed));
                 }
@@ -214,19 +213,21 @@ impl Device {
         context: &Context,
         native_widget: NativeWidget,
     ) -> Result<Surface, Error> {
-        let mut width: u64 = 0;
-        let mut height: u64 = 0;
-        let result = OH_NativeXComponent_GetXComponentSize(native_widget.xcomponent,
-            native_widget.native_window as *mut _,
-            &mut width as *mut _,
-            &mut height as *mut _);
-        if result != 0 {
-            log::error!("create_window_surface OH_NativeXComponent_GetXComponentSize failed");
-            return Err(Error::Failed);
-        }
-        log::info!("create_window_surface with size {width}x{height}");
-
-
+        let mut height: i32 = 0;
+        let mut width: i32 = 0;
+        // Safety: `OH_NativeWindow_NativeWindowHandleOpt` takes two output i32 pointers as
+        // variable arguments when called with `GET_BUFFER_GEOMETRY`. See the OHNativeWindow
+        // documentation for details:
+        // https://gitee.com/openharmony/docs/blob/master/en/application-dev/reference/apis-arkgraphics2d/_native_window.md
+        let result = unsafe {
+            OH_NativeWindow_NativeWindowHandleOpt(
+                native_widget.native_window,
+                GET_BUFFER_GEOMETRY as core::ffi::c_int,
+                &mut height as *mut i32,
+                &mut width as *mut i32,
+            )
+        };
+        assert_eq!(result, 0, "Failed to determine size of native window");
         EGL_FUNCTIONS.with(|egl| {
             let egl_surface = egl.CreateWindowSurface(
                 self.egl_display,
@@ -238,12 +239,11 @@ impl Device {
 
             Ok(Surface {
                 context_id: context.id,
-                size: Size2D::new(width.try_into().unwrap(), height.try_into().unwrap()),
+                size: Size2D::new(width, height),
                 objects: SurfaceObjects::Window { egl_surface },
                 destroyed: false,
             })
         })
-
     }
 
     /// Creates a surface texture from an existing generic surface for use with the given context.
@@ -324,34 +324,36 @@ impl Device {
     unsafe fn create_egl_image(
         &self,
         _: &Context,
-        hardware_buffer: *mut OH_NativeBuffer,
+        _hardware_buffer: *mut OH_NativeBuffer,
     ) -> EGLImageKHR {
-        // Get the native client buffer.
-        let eglGetNativeClientBufferANDROID =
-            EGL_EXTENSION_FUNCTIONS.GetNativeClientBufferANDROID.expect(
-                "Where's the `EGL_ANDROID_get_native_client_buffer` \
-                                            extension?",
-            );
-        let client_buffer =
-            eglGetNativeClientBufferANDROID(hardware_buffer as *const OH_NativeBuffer as *const _);
-        assert!(!client_buffer.is_null());
-
-        // Create the EGL image.
-        let egl_image_attributes = [
-            EGL_IMAGE_PRESERVED_KHR as EGLint,
-            egl::TRUE as EGLint,
-            egl::NONE as EGLint,
-            0,
-        ];
-        let egl_image = (EGL_EXTENSION_FUNCTIONS.CreateImageKHR)(
-            self.egl_display,
-            egl::NO_CONTEXT,
-            EGL_NATIVE_BUFFER_ANDROID,
-            client_buffer,
-            egl_image_attributes.as_ptr(),
-        );
-        assert_ne!(egl_image, EGL_NO_IMAGE_KHR);
-        egl_image
+        error!("create_egl_image not implemented yet on ohos");
+        unimplemented!();
+        // // Get the native client buffer.
+        // let eglGetNativeClientBufferANDROID =
+        //     EGL_EXTENSION_FUNCTIONS.GetNativeClientBufferANDROID.expect(
+        //         "Where's the `EGL_ANDROID_get_native_client_buffer` \
+        //                                     extension?",
+        //     );
+        // let client_buffer =
+        //     eglGetNativeClientBufferANDROID(hardware_buffer as *const OH_NativeBuffer as *const _);
+        // assert!(!client_buffer.is_null());
+        //
+        // // Create the EGL image.
+        // let egl_image_attributes = [
+        //     EGL_IMAGE_PRESERVED_KHR as EGLint,
+        //     egl::TRUE as EGLint,
+        //     egl::NONE as EGLint,
+        //     0,
+        // ];
+        // let egl_image = (EGL_EXTENSION_FUNCTIONS.CreateImageKHR)(
+        //     self.egl_display,
+        //     egl::NO_CONTEXT,
+        //     EGL_NATIVE_BUFFER_ANDROID,
+        //     client_buffer,
+        //     egl_image_attributes.as_ptr(),
+        // );
+        // assert_ne!(egl_image, EGL_NO_IMAGE_KHR);
+        // egl_image
     }
 
     /// Destroys a surface.
@@ -446,7 +448,7 @@ impl Device {
     /// Returns a pointer to the underlying surface data for reading or writing by the CPU.
     #[inline]
     pub fn lock_surface_data<'s>(&self, _: &'s mut Surface) -> Result<SurfaceDataGuard<'s>, Error> {
-        // TODO(pcwalton)
+        error!("lock_surface_data not implemented yet for OHOS");
         Err(Error::Unimplemented)
     }
 
@@ -488,10 +490,10 @@ impl Device {
 }
 
 impl NativeWidget {
-    /// Creates a native widget type from an OHOS Xcomponent and `NativeWindow`.
+    /// Creates a native widget type from an `OHNativeWindow`.
     #[inline]
-    pub unsafe fn from_native_window(xcomponent: *mut OH_NativeXComponent,native_window: *mut OHNativeWindow) -> NativeWidget {
-        NativeWidget { xcomponent, native_window }
+    pub unsafe fn from_native_window(native_window: *mut OHNativeWindow) -> NativeWidget {
+        NativeWidget { native_window }
     }
 }
 

@@ -1,11 +1,8 @@
 // surfman/surfman/src/platform/ohos/connection.rs
 //
-//! A no-op connection for Android.
-//!
-//! FIXME(pcwalton): Should this instead wrap `EGLDisplay`? Is that thread-safe on Android?
+//! A no-op connection for OpenHarmony OS.
 
 use super::device::{Adapter, Device, NativeDevice};
-use super::ffi::OHNativeWindow;
 use super::surface::NativeWidget;
 use crate::Error;
 use crate::GLApi;
@@ -115,21 +112,12 @@ impl Connection {
         raw: *mut c_void,
         _size: Size2D<i32>,
     ) -> NativeWidget {
-        unimplemented!("Not supported.")
-    }
-
-    #[cfg(target_env = "ohos")]
-    pub unsafe fn create_native_widget_from_ptr_ohos(
-        &self,
-        xcomponent: *mut c_void,
-        raw_window: *mut c_void,
-        size: Size2D<i32>,
-    ) -> NativeWidget {
         NativeWidget {
-            xcomponent: xcomponent as *mut _,
-            native_window: raw_window as *mut _,
+            native_window: raw.cast()
         }
     }
+
+
 
     /// Create a native widget type from the given `RawWindowHandle`.
     #[cfg(feature = "sm-raw-window-handle-05")]
@@ -156,8 +144,7 @@ impl Connection {
 
         match handle.as_raw() {
             OhosNdk(handle) => Ok(NativeWidget {
-                xcomponent: handle.xcomponent.as_ptr() as *mut _,
-                native_window: handle.native_window.as_ptr() as *mut _,
+                native_window: handle.native_window.as_ptr().cast(),
             }),
             _ => Err(Error::IncompatibleNativeWidget),
         }

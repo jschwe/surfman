@@ -69,15 +69,6 @@ pub trait Connection: Sized {
         size: Size2D<i32>,
     ) -> Self::NativeWidget;
 
-    /// Creates a native widget from a raw pointer
-    #[cfg(target_env = "ohos")]
-    unsafe fn create_native_widget_from_ptr_ohos(
-        &self,
-        xcomponent: *mut c_void,
-        raw_window: *mut c_void,
-        size: Size2D<i32>,
-    ) -> Self::NativeWidget;
-
     /// Create a native widget type from the given `RawWindowHandle`.
     #[cfg(feature = "sm-raw-window-handle-05")]
     fn create_native_widget_from_raw_window_handle(

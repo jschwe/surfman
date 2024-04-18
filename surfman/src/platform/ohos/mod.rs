@@ -8,7 +8,6 @@ pub mod device;
 pub mod surface;
 
 mod ffi;
-mod ffi_xcomponents;
 
 #[path = "../../implementation/mod.rs"]
 mod implementation;
